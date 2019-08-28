@@ -2,7 +2,12 @@
 title: "10장 기계학습 알고리즘1"
 author: "jihyun"
 date: '2019 8 28 '
-output: html_document
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook: default
+  html_document: default
+mainfont: NanumGothic
 ---
 
 ```{r setup, include=FALSE}
