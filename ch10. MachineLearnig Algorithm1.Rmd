@@ -1,10 +1,8 @@
 ---
 title: "10장 기계학습 알고리즘1"
 author: "jihyun"
-date: '2019 8 26 '
-output:
-  html_document:
-    df_print: paged
+date: '2019 8 28 '
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -269,16 +267,17 @@ result <- foreach(g = 1:NROW(grid), .combine = rbind) %do% {
   }
 }
                      
-result
-```
+str(result)
 
-
-g 값 마다 묶어서 평균을 구해보자
-```{r}
-#install.packages('plyr')
 library(plyr)
 ddply(result, .(g), summarise, mean_precision = mean(precision))
 ```
+
+
+
+
+
+g 값 마다 묶어서 평균을 구해보자
 
 가장 높은 성능은 g=4, g=6일 때다.
 이 조합을 grid에서 찾아보면 ntree = 10, mtry = 4인 경우와, ntree = 200, mtry = 4인 경우이다.
