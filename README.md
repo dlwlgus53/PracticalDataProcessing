@@ -2,9 +2,8 @@
 title: "10장 기계학습 알고리즘1"
 author: "jihyun"
 date: '2019 8 26 '
-output:
-  html_document:
-    df_print: paged
+output: rmarkdown::github_document
+
 ---
 
 ```{r setup, include=FALSE}
@@ -132,6 +131,7 @@ rpart 또한 predict()를 통해 예측을 어떻게 했는지 볼 수 있다.
 
 ```{r}
 head(predict(m, newdata = iris, type = 'class'))
+ tinytex::install_tinytex()
 ```
 
 의사결정나무의 성능을 높이는 방법으로는 prunnung, rpart.control 등의 성능튜닝 방법이 있다.
