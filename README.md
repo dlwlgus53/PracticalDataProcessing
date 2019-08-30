@@ -7,4 +7,4 @@
 ###### 2  [신경망, SVM](https://github.com/dlwlgus53/PracticalDataProcessing/blob/master/ch10_MachineLearnigAlgorithm2.pdf)
         
 ### ch.11 타이타닉 데이터를 사용한 기계학습 실습
-###### [타이타닉 데이터 실습](https://github.com/dlwlgus53/PracticalDataProcessing/blob/master/ch11_Titanic.pdf)
+###### 1 [타이타닉 데이터 실습](https://github.com/dlwlgus53/PracticalDataProcessing/blob/master/ch11_Titanic.pdf)
