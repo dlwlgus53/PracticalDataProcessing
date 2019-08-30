@@ -1,0 +1,427 @@
+---
+title: "11장 titanic 생존자 예측"
+author: "jihyun"
+date: '2019 8 28 '
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook: default
+  html_document: default
+mainfont: NanumGothic
+---
+# 타이타닉 데이터를 사용한 기계학습 실습
+
+## 01 타이타닉 데이터 받기
+타이타닉 데이터는 http://biostat.mc.vanderbilt.edu/wiki/Main/DataSets 에서 titanic3.csv 를 다운받으면 된다.
+
+## 02 데이터 불러오기
+read.csv() 를 통해 titanic3.csv를 불러올 수 있다. 불러온 뒤에 사용할 column만 분리했다.
+```{r}
+titanic = read.csv("titanic3.csv")
+titanic <- titanic[, !names(titanic) %in% c("home.dest", "boat", "body")]
+str(titanic)
+```
+
+변수설명
+pclass : 1,2,3 등석 정보
+survived : 생존여부(survived, dead)
+name : 이름
+sex : 성별
+age : 나이
+sibsp : 함께 탑승한 형제, 또는 배우자의 수
+parch : 함께 탑승한 부모, 또는 자녀의 수
+ticket : 티켓 번호
+fare : 티켓 요금
+cabin : 선실 번호
+embarcked : 탑승한곳 C: cherbourg, Q : Queenstown, S : Southampton
+
+
+## 03 데이터 타입 변경
+str(titanic)의 결과를 보면 pclass가 int로 저장되어있다. 그러나 pclass는숫자로 취급하기 보다는 범주형 변수인 factor로 취급하는것이 낫다.
+또한 survived또한 factor로 취급하는 것이 좋다. int로 되어있으면 분류 알고리즘이 아니라 회귀분석 알고리즘이 실행되게 된다.
+
+마지막으로, name, ticket, cabin은 factor가 아니라 단순 문자열로 나타내는것이 더 옳다.
+
+```{r}
+titanic$pclass <- as.factor(titanic$pclass)
+titanic$name <- as.character(titanic$name)
+titanic$ticket <- as.character(titanic$ticket)
+titanic$cabin <- as.character(titanic$cabin)
+titanic$survived <- factor(titanic$survived, levels=c(0,1), labels=c("dead","survived"))
+str(titanic)
+```
+
+str을 자세히 보면 embarked에 "" 값이있는 것을 볼 수 있다.
+table을 통해 보면
+```{r}
+table(titanic$embarked)
+```
+"" 인 값이 2개가 있는 것을 알 수 있고, 이것은 NA를 의미한다.
+""를 NA로 수정해 보자.
+
+```{r}
+levels(titanic$embarked)[1] <- NA
+table(titanic$embarked, useNA = "always")# table 함수는 NA를 제외하고 출력하기 때문에 na를 표시하려면 always를 해줘야 한다.
+```
+
+cabin컬럼에도 빈 문자열이 저장되어있다. 이 값 역시 NA로 바꿔보자.
+```{r}
+titanic$cabin <- ifelse(titanic$cabin == "", NA, titanic$cabin)
+str(titanic)
+```
+
+(Factor 와 character에 na해주는 방법에 차이가 있다.)
+
+## 04. 테스트 데이터의 분리.
+test데이터와 train데이터를 분리해 보자.
+createDataPartion()을 통해 데이터를 나누면, test, train데이터 간의생존자 수와 사망자 수의 비율을 고려하여 데이터를 분리 할 수 있다.
+
+```{r}
+library(caret)
+set.seed(137)
+test_idx <- createDataPartition(titanic$survived, p=0.1)$Resample1
+titanic.test <- titanic[test_idx,]
+titanic.train <- titanic[-test_idx,]
+```
+데이터 분리가 끝나면 이후 단계에서 사용이 편리하도록 저장해 놓는다. 
+
+아래 코드는 titanic, titanic.test, titanic.train 데이터를 titanic.RData라는 파일에 저장한다.
+```{r}
+save(titanic, titanic.test, titanic.train, file = "titanic.RData")
+```
+
+## 05. 교차 검증 준비
+caret 패키지의 creatFolds()를 이용해 데이터를 분리해 보자.
+
+```{r}
+#(createFolds(titanic.train$survived, k=10))
+```
+
+수행 결과, 10개의 fold가 만들어 져서 리스트에 저장되어 있는 것을 알 수 있다.
+```{r}
+create_ten_fold_cv <- function(){
+  set.seed(137)
+  lapply(createFolds(titanic.train$survived, k=10), function(idx){
+    return(list(train=titanic.train[-idx, ],
+                validation = titanic.train[idx, ]))
+  })
+}
+```
+
+이 함수는 Fold01, Fold02 ..를 포함하는 리스트를 반환하며, 각 폴드에는 train, validatoin이라는 이름에 훈련 데이터와 검증 데이터가 저장된다.
+
+
+## 06. 데이터 탐색
+
+모델을 작성하기 전에 데이터가 어떤 모습을 하고 있는지 살펴보면 모델을 세울 방법에 관한 많은 힌트를 얻을 수 있다.
+Hmisc패키지에는 summary에 포뮬러를 지정해 데이터의 요약 정보를 얻을 수 있는 기능이 있다.
+
+```{r}
+#install.packages("Hmisc")
+library(Hmisc)
+data <- create_ten_fold_cv()[[1]]$train
+#reverse 는 종속 변수 survived에 따라 독렵 변서들을 분할하여 보여줌
+summary(survived ~ pclass + sex + age + sibsp + parch + fare + embarked, data = data, method = "reverse")
+
+```
+
+이번에는 caret::featurePlot()을 사용해 데이터를 시각해 보자.
+featurePlot()은 NA가 하나라도 있으면 차트가 제대로 그려지지 않으므로, NA 부터 제거해야 한다.
+이때 complete.cases()를 사용하여 na가 있는지 쉽게 볼 수 있다.
+
+```{r}
+#install.packages("ellipse")
+library(ellipse)
+data <- create_ten_fold_cv()[[1]]$train
+data.complete <- data[complete.cases(data),]# na가 없는 행 만 가져온다.
+
+featurePlot(
+  data.complete[
+    ,sapply(names(data.complete),
+            function(n){is.numeric(data.complete[,n])})],# numeric 열만 선택
+  data.complete[,c("survived")],
+  "ellipse"
+)
+```
+
+팩터 타입의 차트에는 모자이크 플롯을 사용할 수 있다.
+
+```{r}
+mosaicplot(survived ~pclass + sex, data = data, color = TRUE,
+          main <- "pclass and sex")
+```
+
+분활표를 사용 할 수도 있다.
+아래 분활표는 생존자 수와 관계없이, 성별과 class를 나타낸 분활표이다.
+
+```{r}
+xtabs(~ sex + pclass, data = data)
+```
+
+아래 분활표는 생존 자 중에서 성별과 class를 나타낸 분활표이다.
+```{R}
+xtabs(survived == "survived" ~ sex + pclass, data = data)# survived == "survived" 뜻은 생존한 사람들 중에서
+```
+
+두결과를 조합해서 생존율을 구할 수 있다.
+
+```{r}
+xtabs(survived == "survived" ~ sex+ pclass, data=data) / xtabs( ~sex + pclass, data = data)
+```
+
+## 07. 평가 메트릭
+탑승객 생존 여부 예측 모델의 성능은 정확도(accuracy)로 하기로 한다.
+정확도는 예측값이 true 이든 false이든 정확히 예측한 값의 비율을 뜻한다.
+
+## 08. 의사결정 나무 모델
+의사결정나무 모델은 다양한 변수의 상호 작용을 잘 표현해 준다. 또 타이타닉 데이터에는 na값이aksgdmsep, rpart는 이를 대리변수로 처리해준다.
+대리변수란 노드에서 가지치기를 할 때 사용된 변수를 대신할 수있는 다른 변수를 말한다.
+예를들어 age변수로 가지치기를 해야하는데 age변수가 na값이라면 height를 통해 age를 유추해서 가지치기를 하는 방식이다.
+
+의사결정 나무 모델에 적합하지 않은 name(이름), ticket(티켓번호), cabin(방 번호)를 제외하고 모델을 만들어 보자.
+
+```{r}
+library(rpart)
+m <- rpart (
+  survived ~pclass + sex + age + sibsp + parch + fare + embarked,
+  data = titanic.train)
+
+p <- predict(m, newdata = titanic.test, type = "class")
+head(p)
+
+```
+
+## 09. rpart의 교차검증
+교차 테스트 데이터에 대한 예측값을 구해보자. 
+
+```{r}
+library(rpart)
+library(foreach)
+folds <- create_ten_fold_cv()
+
+rpart_result <- foreach(f=folds) %do% {
+  model_rpart <- rpart(
+    survived ~ pclass + sex + age+ sibsp + parch + fare + embarked,
+    data = f$train)
+  predicted <- predict(model_rpart, newdata = f$validation,
+                       type = "class")
+  return(list(actual = f$validation$survived, predicted = predicted))
+}
+```
+
+rpart_result에는 각 fold에 대한 예측값과 실제값이 들어가게 된다.
+
+## 10. 정확도 평가
+rpart_result가 리스트인 것을 감안하여 정확도를 계산하는 함수를 만들어 보자.(이 함수는 다른 모델의 결과값에도 적용 될 수 있다.)
+
+```{r}
+evaluation <- function(lst){
+  accuracy <- sapply(lst, function(one_result){
+    return(sum(one_result$predicted == one_result$actual)/NROW(one_result$actual))
+  })
+  
+  print(sprintf("MEAN +/- SD : %.3f +/- %.3f",
+                mean(accuracy), sd(accuracy)))
+  return(accuracy)
+}
+
+(rpart_accuracy <- evaluation(rpart_result))
+
+```
+
+출력결과 모델의 성능은 80.1%로 나타났다.
+
+## 11. 모델 향상시키기 - 조건부 추론 나무
+
+조건부 추론 나무를 이용하여 정확도를 높혀보자.
+```{r}
+library(party)
+ctree_result <- foreach(f=folds) %do%{
+  model_ctree <- ctree(
+    survived ~ pclass + sex + age + sibsp + parch + fare + embarked,
+    data = f$train)
+  predicted <- predict(model_ctree, newdata=f$validation,
+                       type = "response")
+  return(list(actual = f$validation$survived, predicted = predicted))
+}
+
+(ctree_accuracy <- evaluation(ctree_result))
+
+
+```
+
+출력결과 조건부 추론 나무의 성능은 80.4%로 의사결정나무 모델보다 약간 정확도가 높은 것을 알 수 있다.
+
+또는 다음과 같이 밀도그림을 그려 정확도의 분포를 볼 수 있다.
+
+```{r}
+plot(density(rpart_accuracy), main = "rpart vs ctree")+lines(density(ctree_accuracy), col ="red", lty="dashed")
+```
+
+## 12. 모델 향상시키기 - 가족id만들기
+
+가족의 생존여부에 따라서 각 개인의 생존여부에 영향이 갈 수도있기 때문에, 가족 변수를 만들어 보자.
+티켓 id가 같으면 같은 가족일 것이라고 가정하고 가족 id를 많들어 보자.
+
+그러나 훈련데이터와 검증데이터에 가족구성원이 나눠져 있으면 제대로 예측이 되지 않고, 타이타닉 데이터의 수가 작기 때문에, 훈련데이터와 검증 데이터 모두를 이용하여 가족id를 만들자.
+
+
+먼저는 ticket이 가족을 찾는 데 얼마나 유용한지 보자.
+
+아래는 titanic.train데이터를 ticket아이디에 따라 정렬해 표시한 것이다.
+```{r}
+head(titanic.train[order(titanic.train$ticket), 
+               c("ticket","parch", "name","cabin","embarked")],10)
+```
+위의 결과를 보면 Taussig성을 가진 3명의 사람들이 비슷한 선실, 같은 탑승위치에 탄 것으로 보아, 가족임을 알 수 있다.
+이러한 방식을 ticket을 통해 가족을 유추 해 낼 수 있는것을 알 수 있다.
+
+## 13. 교차검증 데이터 준비하기(각 탑승객의 생존확률 구하기)
+
+위에서 한 것 처럼 교차검증을 위한 데이터를 준비한다. 하지만 가족관계를 위해서 처음에는 validation과 train데이터를 합쳐서 가족관계를 파악 한 후 다시 둘을 분리해야 한다. 따라서 type변수를 두어 나중에 분리할 수 있게 하였고, prob변수를 두어 각 사람의 생존률을 저장할 수 있게 하였다.(이전에는 type = "class"를 통해 바로 생존 결과를 출력했다면 이번에는 type = "prob"로 두어 확률을 저장했다.)
+
+```{r}
+family_result <- foreach(f=folds) %do%{
+  f$train$type = "T"
+  f$validation$type = "V"
+  
+  all<- rbind(f$train, f$validation)
+  ctree_model <- ctree(
+    survived ~ pclass + sex + age + sibsp + parch + fare + embarked,
+    data = f$train)
+  
+  all$prob <- sapply(
+    predict(ctree_model, type = "prob", newdata = all),
+    function(result){result[1]}#result[2]는 사망확률
+  )
+}
+```
+
+
+## 14. 가족ID부여
+
+생존 확률의 예측값을 가족 단위로 모으기 위해 어떤 탑승객이 누구와 가족인지를 알아보자.
+티켓 번호별로 가족ID룰 부여하자. 
+
+```{R}
+#install.packages('plyr')
+library(plyr)
+family_idx <- 0
+ticket_based_family_id <- ddply(all, .(ticket), function(rows){# 같은 ticket번호를 가진 행끼리 그룹으로 묶인다.그후 functino에 rows로 전달.
+  family_idx <<- family_idx+1
+  return(data.frame(family_id = paste0("TICKET_", family_idx)))# 전달받을 row 들의 family_id에 "TICKET_1"과 같이 저장
+})
+str(all)
+```
+
+이제 all 데이터 프레임에 ticket값에 따라 family id 를 추가해 보자.
+
+```{r}
+library(dplyr)
+all <- adply(all,
+             1,# 각 행마다 호출, 2 를 전달하면 각 컬럼마다 호출
+             function(row){
+               family_id <-NA
+               if(!is.na(row$ticket)){
+                 family_id <- subset(ticket_based_family_id, ticket == row$ticket)$family_id
+
+               }
+               return(data.frame(family_id = family_id))
+             })
+str(all)
+
+```
+
+## 15. 가족 구성원 생존 확률의 병합
+
+다음과 같은 변수를 데이터 프레임에 추가해보자.
+
+avg_prob : 가족 구성원의 평균 생존 확률
+maybe_parent / maybe_child : 특정 탑승객이 부모인지 자녀인지 여부
+parent_prob / child_prob : 부모의 평균 생존율과 자녀의 평균 생존율
+
+가족 구성원의 평균 생존율은 ddply()로 쉽게 구할 수 있다.
+
+```{r}
+all <- ddply(all,
+             .(family_id),
+             function(rows){
+               rows$avg_prob <- mean(rows$prob)
+               return(rows)
+             })
+```
+
+다음은 각 탑승객이 부모 또는 자녀 중 어느 쪽에 속하는지를 알아볼 차례이다.
+부모인지 자녀인지 여부는 maybe_parent, maybe_child에 저장될 것이며, 부모 자녀를 판단하는 기준으로는 나이(age)를 사용한다.
+
+```{r}
+all <- ddply(all,.(family_id), function(rows){
+  rows$maybe_parent <- FALSE
+  rows$maybe_child <- FALSE
+  #부모도 아니고 자녀도 아니라고 판단하는 세가지 기준
+  if(NROW(rows) == 1 ||# 가족 구성원의 수가 한명이라면 부모도, 자녀도 아니다.
+     sum(rows$parch)==0 ||# 부모, 또는 자녀의 수가 0이면 부모도, 자녀도 아니다.
+     NROW(rows) == sum(is.na(rows$age))){# 모든 행에 나이가 지정되어 있지 않다.(전부 na이다) -> 부모 자식을 구분할수 없으므로 제외
+    return(rows)
+  }
+ 
+  max_age <- max(rows$age, na.rm = TRUE)
+  min_age <- min(rows$age, na.rm = TRUE)
+  return(adply(rows, 1, function(row){
+    if(!is.na(row$age) && !is.na(row$sex)){
+      row$maybe_parent <- (max_age - row$age)<10# 최고나이에서 10 미만으로 차이가 난다 == 부모이다.
+      row$maybe_child <- (row$age - min_age)<10# 최소 나이에서 10 미만으로 차이가 난다 == 자녀이다.
+    }
+    return(row)
+  }))
+})
+```
+
+
+이렇게 부모 자녀 여부를 판단하고 나면 부모의 생존 확률과 자녀의 평균 생존 확률을 구할 수 있다.
+
+```{r}
+all <- ddply(all, .(family_id), function(rows){
+  rows$avg_parent_prob <- rows$avg_prob #기본값은 가족의 평균 생존확률
+  rows$avg_child_prob <- rows$avg_prob # 기본값은 가족의 평균 생존확률
+  if(NROW(rows)==1 || sum(rows$parch == 0)){# 가족이 없는 경우는 return
+    return(rows)
+  }
+  
+  # 가족 중 부모의 학률
+  parent_prob <- subset(rows, maybe_parent == TRUE)[,"prob"]
+  if(NROW(parent_prob>0)){
+    rows$avg_parent_prob <- mean(parent_prob)
+  }
+  
+  # 가족 중 자녀의 확률
+  child_prob <- c(subset(rows, maybe_child == TRUE)[,"prob"])
+  
+  if(NROW(child_prob) > 0){
+    rows$avg_child_prob <- mean(child_prob)
+  }
+  
+  return(rows)
+})
+str(all)
+```
+
+
+## 16.가족 정보를 사용한 ctree()모델링
+
+이제 all데이터를 사용해 모델을 만들고 성능을 평가해 보자. 
+type, avg_prob, maybe_parent, maybe_child, avg_parent_prob, avg_child_prob를 사용할 것이다.
+
+all 에 있는 정보 중 훈련데이터를 사용해 ctree()를 수행하고 이를 검증 데이터에 적용해보자.
+
+```{r}
+f$train <- subset(all, type="T")
+f$validation <- subset(all, type = "V")
+
+(m<- ctree(survived ~ pclass + sex + age + sibsp + parch + fare + embarked + 
+             maybe_parent + maybe_child + avg_prob + avg_parent_prob + avg_child_prob,
+           data = f$train))
+print(m)
+predicted <- predict(m, newdata = f$validation)
+```
+확인결과, avg_prob, avg_child_prob이 유용하게 사용되고 있는것을 알 수 있다.(일찍 사용되었다.)
